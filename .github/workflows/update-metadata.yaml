@@ -1,0 +1,44 @@
+name: Update metadata.yaml with commit info
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  update-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Get latest commit info
+        id: commit
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "msg=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+
+      - name: Update metadata.yaml
+        run: |
+          sha=${{ steps.commit.outputs.sha }}
+          msg=${{ steps.commit.outputs.msg }}
+          tmpfile=$(mktemp)
+
+          # Prepend new version entry to metadata.yaml
+          echo "homepage: \"https://www.digiseg.io\"" > $tmpfile
+          echo "documentation: \"https://www.digiseg.io/resources/google-tag-manager\"" >> $tmpfile
+          echo "versions:" >> $tmpfile
+          echo "  - sha: $sha" >> $tmpfile
+          echo "    changeNotes: >" >> $tmpfile
+          echo "      $msg" >> $tmpfile
+          # Append old versions (skip first 3 lines of old metadata)
+          tail -n +4 metadata.yaml >> $tmpfile
+          mv $tmpfile metadata.yaml
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add metadata.yaml
+          git commit -m "Update metadata.yaml with commit ${{ steps.commit.outputs.sha }}"
+          git push
