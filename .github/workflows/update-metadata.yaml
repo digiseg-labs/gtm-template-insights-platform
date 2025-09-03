@@ -2,43 +2,65 @@ name: Update metadata.yaml with commit info
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   update-metadata:
+    if: github.actor != 'github-actions[bot]'  # avoid loops if you push metadata commits
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Get latest commit info
         id: commit
+        shell: bash
         run: |
-          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-          echo "msg=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          {
+            echo "msg<<EOF"
+            git log -1 --pretty=%B
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Update metadata.yaml
+      - name: Prepend entry to metadata.yaml
+        shell: bash
         run: |
-          sha=${{ steps.commit.outputs.sha }}
-          msg=${{ steps.commit.outputs.msg }}
+          sha='${{ steps.commit.outputs.sha }}'
+          msg='${{ steps.commit.outputs.msg }}'
           tmpfile=$(mktemp)
 
-          # Prepend new version entry to metadata.yaml
-          echo "homepage: \"https://www.digiseg.io\"" > $tmpfile
-          echo "documentation: \"https://www.digiseg.io/resources/google-tag-manager\"" >> $tmpfile
-          echo "versions:" >> $tmpfile
-          echo "  - sha: $sha" >> $tmpfile
-          echo "    changeNotes: >" >> $tmpfile
-          echo "      $msg" >> $tmpfile
-          # Append old versions (skip first 3 lines of old metadata)
-          tail -n +4 metadata.yaml >> $tmpfile
-          mv $tmpfile metadata.yaml
+          # If file doesn't exist yet, create a minimal base
+          if [ ! -f metadata.yaml ]; then
+            cat > metadata.yaml <<'YAML'
+homepage: "https://www.digiseg.io"
+documentation: "https://www.digiseg.io/resources/google-tag-manager"
+versions:
+YAML
+          fi
 
-      - name: Commit and push changes
+          # Write new header + new version block
+          {
+            echo 'homepage: "https://www.digiseg.io"'
+            echo 'documentation: "https://www.digiseg.io/resources/google-tag-manager"'
+            echo 'versions:'
+            echo "  - sha: $sha"
+            echo "    changeNotes: >"
+            # indent each line of the commit message by 6 spaces
+            printf '%s\n' "$msg" | sed 's/^/      /'
+            # append previous versions (skip first 3 header lines)
+            tail -n +4 metadata.yaml 2>/dev/null || true
+          } > "$tmpfile"
+
+          mv "$tmpfile" metadata.yaml
+
+      - name: Commit & push metadata
+        shell: bash
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add metadata.yaml
-          git commit -m "Update metadata.yaml with commit ${{ steps.commit.outputs.sha }}"
+          git commit -m "chore: update metadata.yaml for ${{ steps.commit.outputs.sha }}"
           git push
